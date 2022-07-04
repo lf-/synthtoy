@@ -17,6 +17,7 @@ impl<T: Filter + Send> AudioCallback for SDLShim<T> {
         self.0.process(samples);
     }
 }
+
 fn main() {
     let ctx = sdl2::init().unwrap();
     let audio = ctx.audio().unwrap();
@@ -25,15 +26,20 @@ fn main() {
     pump.enable_event(EventType::KeyDown);
 
     let spec = AudioSpecDesired {
-        freq: Some(44100),
+        freq: Some(SAMPLING_FREQ as i32),
         channels: Some(1),
         samples: None,
     };
 
-
-    let freq_curve = move |x: f32| {if x <= 1000. {1.} else {0.}};
+    let freq_curve = move |x: f32| {
+        if x <= 1000. {
+            1.
+        } else {
+            0.
+        }
+    };
     let synth = SynthBuilder::new()
-        .chain(StringSynth::new())
+        .chain(StringSynth::new(500))
         // .chain(NoopFilter)
         .chain(FIR::new(25, freq_curve))
         .build();
@@ -60,13 +66,13 @@ fn main() {
             } => match keycode {
                 Keycode::O => {
                     let mut lock = dev.lock();
-                    let delay = &mut lock.0.1.0.delay;
+                    let delay = &mut lock.0 .1 .0.delay;
                     delay.set_len(delay.len() + 5);
                     println!("len: {}", delay.len());
                 }
                 Keycode::I => {
                     let mut lock = dev.lock();
-                    let delay = &mut lock.0.1.0.delay;
+                    let delay = &mut lock.0 .1 .0.delay;
                     delay.set_len((delay.len() - 5).max(1));
                     println!("len: {}", delay.len());
                 }
@@ -76,11 +82,11 @@ fn main() {
                 Keycode::G => {
                     let mut lock = dev.lock();
                     // todo fix this by setting trigger on Filter::process
-                    lock.0.1.0.trigger_count = 50;
+                    lock.0 .1 .0.trigger_count = 50;
                 }
                 Keycode::S => {
                     let lock = dev.lock();
-                    lock.0.1.0.snoop.save().unwrap();
+                    lock.0 .1 .0.snoop.save().unwrap();
                     // lock.0.snoop.save().unwrap();
                 }
                 _ => {}

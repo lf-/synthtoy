@@ -1,16 +1,10 @@
 use std::{
-    cell::{Cell, RefCell},
+    cell::Cell,
+    f32::consts::PI,
     fs::OpenOptions,
     io::{self, BufWriter},
-    thread,
-    time::Duration, f32::consts::PI,
 };
 
-use sdl2::{
-    audio::{AudioCallback, AudioSpecDesired},
-    event::{Event, EventType},
-    keyboard::Keycode,
-};
 use wav::BitDepth;
 
 pub struct SynthBuilder<T: Filter>(T);
@@ -31,9 +25,10 @@ impl<T: Filter> SynthBuilder<T> {
     }
 }
 
+pub const SAMPLING_FREQ: usize = 44100;
+
 pub trait Filter: 'static + Send {
     fn process(&mut self, samples: &mut [f32]);
-
 }
 
 pub struct DelayLine {
@@ -69,22 +64,30 @@ impl Filter for DelayLine {
 
 pub struct LowPass {
     pub last: f32,
+    pub gain: f32,
+}
+
+impl LowPass {
+    fn new(gain: f32) -> Self {
+        Self {
+            last: 0.,
+            // stop you from making it have >unity gain
+            gain: gain.min(0.499),
+        }
+    }
 }
 
 impl Default for LowPass {
     fn default() -> Self {
-        Self { last: 0. }
+        Self::new(0.5)
     }
 }
-
-
 
 impl Filter for LowPass {
     fn process(&mut self, samples: &mut [f32]) {
         for s in samples.iter_mut() {
             let s2 = *s;
-            // so that gain is less than unity
-            *s = (self.last + s2) * 0.499;
+            *s = (self.last + s2) * self.gain;
             self.last = s2;
         }
     }
@@ -95,14 +98,14 @@ impl Filter for LowPass {
 // sum(cx | x <- [1..n]) <= 1
 // can express as a dot product of two matrices of coeffs to inputs
 // to achieve an FIR, take in a desired frequency response curve, perform an inverse FFT to get the individual coeffs
-// sample frequency response at given rate, e.g. 
+// sample frequency response at given rate, e.g.
 // issue: how to implement phase delay at the fundamental frequency
 
 // frequency sampling implementation of FIR
 pub struct FIR {
     omegas: Vec<(f32, f32)>, // (initial freq resp(omega_k), omega_k)
     freq0: f32,
-    coeff: f32
+    coeff: f32,
 }
 
 impl FIR {
@@ -124,7 +127,11 @@ impl FIR {
             .collect();
         let freq0 = freq_resp_curve(0.);
 
-        Self { omegas, freq0, coeff: 1.0 / m as f32}
+        Self {
+            omegas,
+            freq0,
+            coeff: 1.0 / m as f32,
+        }
         // todo!()
     }
 }
@@ -132,13 +139,12 @@ impl FIR {
 impl Filter for FIR {
     fn process(&mut self, samples: &mut [f32]) {
         for sample in samples.iter_mut() {
-                let comp_sum = self.omegas
-                    .iter()
-                    .map(|&(resp, omega_k)| {
-                        resp * (omega_k * *sample).cos()
-                    })
-                    .sum::<f32>();
-                *sample = self.coeff * (self.freq0 + 2. * comp_sum);
+            let comp_sum = self
+                .omegas
+                .iter()
+                .map(|&(resp, omega_k)| resp * (omega_k * *sample).cos())
+                .sum::<f32>();
+            *sample = self.coeff * (self.freq0 + 2. * comp_sum);
         }
     }
 }
@@ -202,11 +208,10 @@ impl Filter for Snoop {
     }
 }
 
-
 pub struct NoopFilter;
 
 impl Filter for NoopFilter {
-    fn process(&mut self, samples: &mut [f32]) { }
+    fn process(&mut self, samples: &mut [f32]) {}
 }
 
 pub struct Chain<H: Filter, T: Filter>(pub H, pub T);
@@ -241,8 +246,6 @@ pub struct SquareWave {
     pub phase: f32,
     pub volume: f32,
 }
-
-const STRING_SYNTH_DEPTH: usize = 100;
 
 impl Filter for SquareWave {
     fn process(&mut self, samples: &mut [f32]) {
@@ -302,9 +305,16 @@ pub struct StringSynth {
 }
 
 impl StringSynth {
-    pub fn new() -> StringSynth {
+    pub fn tune(&mut self, freq: f32) {
+        // FIXME: not perfect; will be slightly out of tune until we implement
+        // fractional delays
+        self.delay
+            .set_len((SAMPLING_FREQ as f32 / freq).round() as usize);
+    }
+
+    pub fn new(depth: usize) -> StringSynth {
         StringSynth {
-            delay: DelayLine::new(STRING_SYNTH_DEPTH),
+            delay: DelayLine::new(depth),
             lpf: LowPass::default(),
             rng: Rng::default(),
             snoop: Snoop::new("string.wav".to_string()),
