@@ -30,8 +30,16 @@ fn main() {
         samples: None,
     };
 
+
+    let freq_curve = move |x: f32| {if x <= 1000. {1.} else {0.}};
+    let synth = SynthBuilder::new()
+        .chain(StringSynth::new())
+        // .chain(NoopFilter)
+        .chain(FIR::new(25, freq_curve))
+        .build();
+
     let mut dev = audio
-        .open_playback(None, &spec, |_spec| SDLShim(StringSynth::new()))
+        .open_playback(None, &spec, |_spec| SDLShim(synth))
         .unwrap();
 
     dev.resume();
@@ -52,13 +60,13 @@ fn main() {
             } => match keycode {
                 Keycode::O => {
                     let mut lock = dev.lock();
-                    let delay = &mut lock.0.delay;
+                    let delay = &mut lock.0.1.0.delay;
                     delay.set_len(delay.len() + 5);
                     println!("len: {}", delay.len());
                 }
                 Keycode::I => {
                     let mut lock = dev.lock();
-                    let delay = &mut lock.0.delay;
+                    let delay = &mut lock.0.1.0.delay;
                     delay.set_len((delay.len() - 5).max(1));
                     println!("len: {}", delay.len());
                 }
@@ -67,11 +75,13 @@ fn main() {
                 }
                 Keycode::G => {
                     let mut lock = dev.lock();
-                    lock.0.trigger_count = 50;
+                    // todo fix this by setting trigger on Filter::process
+                    lock.0.1.0.trigger_count = 50;
                 }
                 Keycode::S => {
                     let lock = dev.lock();
-                    lock.0.snoop.save().unwrap();
+                    lock.0.1.0.snoop.save().unwrap();
+                    // lock.0.snoop.save().unwrap();
                 }
                 _ => {}
             },

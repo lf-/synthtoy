@@ -3,7 +3,7 @@ use std::{
     fs::OpenOptions,
     io::{self, BufWriter},
     thread,
-    time::Duration,
+    time::Duration, f32::consts::PI,
 };
 
 use sdl2::{
@@ -13,8 +13,27 @@ use sdl2::{
 };
 use wav::BitDepth;
 
+pub struct SynthBuilder<T: Filter>(T);
+
+impl SynthBuilder<NoopFilter> {
+    pub fn new() -> Self {
+        SynthBuilder(NoopFilter)
+    }
+}
+
+impl<T: Filter> SynthBuilder<T> {
+    pub fn chain<F: Filter>(self, filter: F) -> SynthBuilder<Chain<F, T>> {
+        SynthBuilder(Chain(filter, self.0))
+    }
+
+    pub fn build(self) -> T {
+        self.0
+    }
+}
+
 pub trait Filter: 'static + Send {
     fn process(&mut self, samples: &mut [f32]);
+
 }
 
 pub struct DelayLine {
@@ -58,6 +77,8 @@ impl Default for LowPass {
     }
 }
 
+
+
 impl Filter for LowPass {
     fn process(&mut self, samples: &mut [f32]) {
         for s in samples.iter_mut() {
@@ -65,6 +86,59 @@ impl Filter for LowPass {
             // so that gain is less than unity
             *s = (self.last + s2) * 0.499;
             self.last = s2;
+        }
+    }
+}
+
+// group samples into a window of size n
+// y(n) = c1x(n) + c2x(n - 1) + ...
+// sum(cx | x <- [1..n]) <= 1
+// can express as a dot product of two matrices of coeffs to inputs
+// to achieve an FIR, take in a desired frequency response curve, perform an inverse FFT to get the individual coeffs
+// sample frequency response at given rate, e.g. 
+// issue: how to implement phase delay at the fundamental frequency
+
+// frequency sampling implementation of FIR
+pub struct FIR {
+    omegas: Vec<(f32, f32)>, // (initial freq resp(omega_k), omega_k)
+    freq0: f32,
+    coeff: f32
+}
+
+impl FIR {
+    pub fn new(taps: usize, freq_resp_curve: impl Fn(f32) -> f32) -> Self {
+        debug_assert!(taps > 0);
+
+        // since freq response is symmetrical around the origin
+        let m = taps * 2 + 1;
+
+        // freq_resp_curve(omegak) = H(omegak)
+
+        let omegas = (1..=taps)
+            .map(|n| {
+                let omega_k = n as f32 * PI / m as f32;
+                let resp_out = freq_resp_curve(omega_k);
+
+                (resp_out, omega_k)
+            })
+            .collect();
+        let freq0 = freq_resp_curve(0.);
+
+        Self { omegas, freq0, coeff: 1.0 / m as f32}
+        // todo!()
+    }
+}
+
+impl Filter for FIR {
+    fn process(&mut self, samples: &mut [f32]) {
+        for sample in samples.iter_mut() {
+                let comp_sum = self.omegas
+                    .iter()
+                    .map(|&(resp, omega_k)| {
+                        resp * (omega_k * *sample).cos()
+                    })
+                    .sum::<f32>();
+                *sample = self.coeff * (self.freq0 + 2. * comp_sum);
         }
     }
 }
@@ -125,6 +199,21 @@ impl Snoop {
 impl Filter for Snoop {
     fn process(&mut self, samples: &mut [f32]) {
         self.samples.get_mut().extend(samples.iter());
+    }
+}
+
+
+pub struct NoopFilter;
+
+impl Filter for NoopFilter {
+    fn process(&mut self, samples: &mut [f32]) { }
+}
+
+pub struct Chain<H: Filter, T: Filter>(pub H, pub T);
+impl<H: Filter, T: Filter> Filter for Chain<H, T> {
+    fn process(&mut self, samples: &mut [f32]) {
+        self.1.process(samples);
+        self.0.process(samples);
     }
 }
 
