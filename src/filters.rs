@@ -34,7 +34,7 @@ impl DelayLine {
 
     pub fn set_len(&mut self, new_len: usize) {
         self.samples = vec![0.; new_len];
-        self.pos = new_len.min(self.samples.len()) - 1;
+        self.pos %= new_len.min(self.samples.len());
     }
 }
 
