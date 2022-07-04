@@ -1,4 +1,3 @@
-
 use std::{
     cell::{Cell, RefCell},
     fs::OpenOptions,
@@ -24,9 +23,18 @@ pub struct DelayLine {
 }
 
 impl DelayLine {
-    fn new(len: usize) -> DelayLine {
+    pub fn new(len: usize) -> DelayLine {
         let samples = vec![0.; len];
         DelayLine { samples, pos: 0 }
+    }
+
+    pub fn len(&self) -> usize {
+        self.samples.len()
+    }
+
+    pub fn set_len(&mut self, new_len: usize) {
+        self.samples = vec![0.; new_len];
+        self.pos = new_len.min(self.samples.len()) - 1;
     }
 }
 
@@ -55,7 +63,7 @@ impl Filter for LowPass {
         for s in samples.iter_mut() {
             let s2 = *s;
             // so that gain is less than unity
-            *s = (self.last + s2) * 0.4;
+            *s = (self.last + s2) * 0.499;
             self.last = s2;
         }
     }
@@ -145,7 +153,7 @@ pub struct SquareWave {
     pub volume: f32,
 }
 
-const STRING_SYNTH_DEPTH: usize = 2000;
+const STRING_SYNTH_DEPTH: usize = 100;
 
 impl Filter for SquareWave {
     fn process(&mut self, samples: &mut [f32]) {

@@ -42,7 +42,6 @@ fn main() {
 
     loop {
         let ev = pump.wait_event();
-        dbg!(&ev);
         match &ev {
             Event::Quit { .. } => {
                 break;
