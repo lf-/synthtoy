@@ -3,6 +3,7 @@ mod note;
 
 use filters::*;
 
+use note::key_to_freq;
 use sdl2::{
     audio::{AudioCallback, AudioSpecDesired},
     event::{Event, EventType},
@@ -90,7 +91,13 @@ fn main() {
                     lock.0 .1 .0.snoop.save().unwrap();
                     // lock.0.snoop.save().unwrap();
                 }
-                _ => {}
+                &k => {
+                    if let Some(n) = key_to_freq(k) {
+                        let mut lock = dev.lock();
+                        lock.0 .1 .0.tune(n);
+                        lock.0 .1 .0.trigger_count = 50;
+                    }
+                }
             },
             _ => {}
         }
