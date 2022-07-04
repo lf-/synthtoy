@@ -50,12 +50,24 @@ fn main() {
                 keycode: Some(keycode),
                 ..
             } => match keycode {
+                Keycode::O => {
+                    let mut lock = dev.lock();
+                    let delay = &mut lock.0.delay;
+                    delay.set_len(delay.len() + 5);
+                    println!("len: {}", delay.len());
+                }
+                Keycode::I => {
+                    let mut lock = dev.lock();
+                    let delay = &mut lock.0.delay;
+                    delay.set_len((delay.len() - 5).max(1));
+                    println!("len: {}", delay.len());
+                }
                 Keycode::Q => {
                     break;
                 }
                 Keycode::G => {
                     let mut lock = dev.lock();
-                    lock.0.trigger_count = 5000;
+                    lock.0.trigger_count = 50;
                 }
                 Keycode::S => {
                     let lock = dev.lock();
