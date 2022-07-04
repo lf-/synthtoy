@@ -7,21 +7,21 @@ use std::{
 
 use wav::BitDepth;
 
-pub struct SynthBuilder<T: Filter>(T);
+pub struct SynthBuilder<S: 'static + Filter + Send, T: Filter>(S, T);
 
-impl SynthBuilder<NoopFilter> {
-    pub fn new() -> Self {
-        SynthBuilder(NoopFilter)
+impl<S: 'static + Filter + Send> SynthBuilder<S, NoopFilter> {
+    pub fn new(synth: S) -> Self {
+        SynthBuilder(synth, NoopFilter)
     }
+
 }
-
-impl<T: Filter> SynthBuilder<T> {
-    pub fn chain<F: Filter>(self, filter: F) -> SynthBuilder<Chain<F, T>> {
-        SynthBuilder(Chain(filter, self.0))
+impl<S: 'static + Filter + Send, T: Filter> SynthBuilder<S, T> {
+    pub fn chain<F: Filter>(self, filter: F) -> SynthBuilder<S, Chain<F, T>> {
+        SynthBuilder(self.0, Chain(filter, self.1))
     }
 
-    pub fn build(self) -> T {
-        self.0
+    pub fn build(self) -> Synth<S, T> {
+        Synth {synth: self.0, filter: self.1}
     }
 }
 
@@ -214,7 +214,20 @@ impl Filter for NoopFilter {
     fn process(&mut self, samples: &mut [f32]) {}
 }
 
+pub struct Synth<S: 'static + Filter + Send, F: Filter = NoopFilter> {
+    pub synth: S,
+    pub filter: F
+}
+
+impl<S: 'static + Filter + Send, F: Filter> Filter for Synth<S, F> {
+    fn process(&mut self, samples: &mut [f32]) {
+        self.synth.process(samples);
+        self.filter.process(samples);
+    }
+}
+
 pub struct Chain<H: Filter, T: Filter>(pub H, pub T);
+
 impl<H: Filter, T: Filter> Filter for Chain<H, T> {
     fn process(&mut self, samples: &mut [f32]) {
         self.1.process(samples);

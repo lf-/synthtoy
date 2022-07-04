@@ -42,8 +42,7 @@ fn main() {
             0.
         }
     };
-    let synth = SynthBuilder::new()
-        .chain(StringSynth::new(500))
+    let synth = SynthBuilder::new(StringSynth::new(500))
         // .chain(NoopFilter)
         .chain(FIR::new(25, freq_curve))
         .build();
@@ -70,13 +69,13 @@ fn main() {
             } => match keycode {
                 Keycode::O => {
                     let mut lock = dev.lock();
-                    let delay = &mut lock.0 .1 .0.delay;
+                    let delay = &mut lock.0.synth.delay;
                     delay.set_len(delay.len() + 5);
                     println!("len: {}", delay.len());
                 }
                 Keycode::I => {
                     let mut lock = dev.lock();
-                    let delay = &mut lock.0 .1 .0.delay;
+                    let delay = &mut lock.0.synth.delay;
                     delay.set_len((delay.len() - 5).max(1));
                     println!("len: {}", delay.len());
                 }
@@ -86,18 +85,19 @@ fn main() {
                 Keycode::G => {
                     let mut lock = dev.lock();
                     // todo fix this by setting trigger on Filter::process
-                    lock.0 .1 .0.trigger_count = 50;
+                    lock.0.synth.trigger_count = 50;
                 }
                 Keycode::S => {
                     let lock = dev.lock();
-                    lock.0 .1 .0.snoop.save().unwrap();
+                    lock.0.synth.snoop.save().unwrap();
                     // lock.0.snoop.save().unwrap();
                 }
                 &k => {
                     if let Some(n) = key_to_freq(k) {
                         let mut lock = dev.lock();
-                        lock.0 .1 .0.tune(n);
-                        lock.0 .1 .0.trigger_count = 50;
+                        let synth = &mut lock.0.synth;
+                        synth.tune(n);
+                        synth.trigger_count = 50;
                     }
                 }
             },
