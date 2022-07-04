@@ -1,7 +1,9 @@
 mod filters;
 mod note;
+mod wavetable;
 
 use filters::*;
+use wavetable::*;
 
 use note::key_to_freq;
 use sdl2::{

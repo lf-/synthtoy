@@ -652,6 +652,7 @@ dependencies = [
 name = "synthtoy"
 version = "0.1.0"
 dependencies = [
+ "lazy_static",
  "plotters",
  "rustfft",
  "sdl2",
