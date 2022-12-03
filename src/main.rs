@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::mpsc;
 
 mod filters;
@@ -5,14 +6,18 @@ mod note;
 mod wavetable;
 
 use filters::*;
+use midir::MidiInputConnection;
 use wavetable::*;
 
+use clap::{builder::ValueParser, Parser};
 use note::key_to_freq;
 use sdl2::{
     audio::{AudioCallback, AudioSpecDesired},
     event::{Event, EventType},
     keyboard::Keycode,
 };
+
+type Error = Box<dyn std::error::Error + 'static>;
 
 struct SDLShim<T: Filter>(T);
 
@@ -22,6 +27,35 @@ impl<T: Filter + Send> AudioCallback for SDLShim<T> {
     fn callback(&mut self, samples: &mut [Self::Channel]) {
         self.0.process(samples);
     }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+enum MidiDevice {
+    Named(String),
+    Virtual,
+}
+
+impl std::str::FromStr for MidiDevice {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, String> {
+        Ok(match value {
+            "virtual" => todo!("virtual midi devices not yet supported"), //MidiDevice::Virtual,
+            _ => MidiDevice::Named(value.to_string()),
+        })
+    }
+}
+
+#[derive(Clone, Debug, clap::Parser)]
+struct Args {
+    /// MIDI device to get input from. Can be "virtual" to create a virtual
+    /// midi input device that can be sent to from other software.
+    #[clap(long, value_parser = ValueParser::new(MidiDevice::from_str))]
+    midi_device: Option<MidiDevice>,
+
+    /// Lists midi devices then exits.
+    #[clap(long)]
+    midi_list: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -67,7 +101,58 @@ fn parse_midi(timestamp: u64, midi: &[u8]) -> Option<MidiEvent> {
     })
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
+fn initialize_midi(
+    dev: MidiDevice,
+    send_midi: mpsc::Sender<MidiEvent>,
+) -> Result<Option<MidiInputConnection<()>>, Error> {
+    if let MidiDevice::Named(n) = dev {
+        let mut the_port = None;
+        let input = midir::MidiInput::new("synthtoy")?;
+        for port in input.ports() {
+            let name = input.port_name(&port)?;
+            if name.starts_with(&n) {
+                the_port = Some(port);
+            }
+        }
+
+        if let Some(p) = the_port {
+            Ok(Some(input.connect(
+                &p,
+                "synthtoy-in",
+                {
+                    let send_midi = send_midi;
+                    move |ts, data, _| {
+                        if let Some(ev) = parse_midi(ts, data) {
+                            println!("{:?}", &ev);
+                            send_midi.send(ev).unwrap();
+                        }
+                    }
+                },
+                (),
+            )?))
+        } else {
+            Ok(None)
+        }
+    } else {
+        Ok(None)
+    }
+}
+
+fn main() -> Result<(), Error> {
+    let args = Args::parse();
+
+    if args.midi_list {
+        let input = midir::MidiInput::new("synthtoy")?;
+        for port in input.ports() {
+            let name = input.port_name(&port)?;
+            println!("port: {:?}", name);
+        }
+        return Ok(());
+    }
+    run(args)
+}
+
+fn run(args: Args) -> Result<(), Error> {
     let ctx = sdl2::init().unwrap();
     let audio = ctx.audio().unwrap();
     let video = ctx.video().unwrap();
@@ -96,53 +181,17 @@ fn main() -> Result<(), Box<dyn std::error::Error + 'static>> {
         .chain(FIR::new(25, freq_curve))
         .build();
 
-    let synth2 = SynthBuilder::new(StringSynth::new(500))
-        // .chain(NoopFilter)
-        .chain(FIR::new(25, freq_curve))
-        .build();
-
     let mut dev = audio
         .open_playback(None, &spec, |_spec| SDLShim(synth))
         .unwrap();
-    let mut dev2 = audio
-        .open_playback(None, &spec, |_spec| SDLShim(synth2))
-        .unwrap();
 
     dev.resume();
-    dev2.resume();
 
     let win = video.window("synthtoy", 200, 200);
     let mut win = win.build().unwrap();
     win.show();
 
-    let input = midir::MidiInput::new("synthtoy")?;
-    let mut the_port = None;
-    for port in input.ports() {
-        let name = input.port_name(&port)?;
-        println!("port: {:?}", name);
-        if name.starts_with("Arturia BeatStep Pro:Arturia BeatStep Pro Arturia Be") {
-            the_port = Some(port);
-        }
-    }
-
-    let _conn = if let Some(p) = the_port {
-        Some(input.connect(
-            &p,
-            "synthtoy-in",
-            {
-                let send_midi = send_midi;
-                move |ts, data, _| {
-                    if let Some(ev) = parse_midi(ts, data) {
-                        println!("{:?}", &ev);
-                        send_midi.send(ev).unwrap();
-                    }
-                }
-            },
-            (),
-        )?)
-    } else {
-        None
-    };
+    let _midi = args.midi_device.map(|d| initialize_midi(d, send_midi));
 
     loop {
         let ev = pump.wait_event();

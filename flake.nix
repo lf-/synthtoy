@@ -62,7 +62,15 @@
               nativeBuildInputs = with final; [ cmake pkg-config ];
 
               # native libs
-              buildInputs = with final; [ portaudio freetype stdenv expat SDL2 alsa-lib ];
+              buildInputs = with final; [
+                portaudio
+                freetype
+                stdenv
+                expat
+                SDL2
+                alsa-lib
+                fontconfig
+              ];
             };
           }
       );
