@@ -59,6 +59,14 @@ struct Args {
 }
 
 #[derive(Clone, Copy, Debug)]
+enum AudioEvent {
+    // FIXME: timestamping?
+    Midi(MidiEvent),
+    PlayNote(f32),
+    Terminate,
+}
+
+#[derive(Clone, Copy, Debug)]
 struct MidiEvent {
     timestamp: u64,
     channel: u8,
@@ -103,7 +111,7 @@ fn parse_midi(timestamp: u64, midi: &[u8]) -> Option<MidiEvent> {
 
 fn initialize_midi(
     dev: MidiDevice,
-    send_midi: mpsc::Sender<MidiEvent>,
+    send_midi: mpsc::Sender<AudioEvent>,
 ) -> Result<Option<MidiInputConnection<()>>, Error> {
     if let MidiDevice::Named(n) = dev {
         let mut the_port = None;
@@ -124,7 +132,7 @@ fn initialize_midi(
                     move |ts, data, _| {
                         if let Some(ev) = parse_midi(ts, data) {
                             println!("{:?}", &ev);
-                            send_midi.send(ev).unwrap();
+                            send_midi.send(AudioEvent::Midi(ev)).unwrap();
                         }
                     }
                 },
@@ -152,22 +160,13 @@ fn main() -> Result<(), Error> {
     run(args)
 }
 
-fn run(args: Args) -> Result<(), Error> {
-    let ctx = sdl2::init().unwrap();
-    let audio = ctx.audio().unwrap();
-    let video = ctx.video().unwrap();
-    let event = ctx.event()?;
-    event.register_custom_event::<MidiEvent>()?;
-    let mut pump = ctx.event_pump().unwrap();
-    pump.enable_event(EventType::KeyDown);
+struct AudioSubsystemCrimesWrapper(sdl2::AudioSubsystem);
 
-    let (send_midi, recv_midi) = mpsc::channel();
+// SAFETY: crimes!
+unsafe impl Send for AudioSubsystemCrimesWrapper {}
 
-    let spec = AudioSpecDesired {
-        freq: Some(SAMPLING_FREQ as i32),
-        channels: Some(1),
-        samples: None,
-    };
+fn audio_thread(audio: AudioSubsystemCrimesWrapper, audio_recv: mpsc::Receiver<AudioEvent>) {
+    let audio = audio.0;
 
     let freq_curve = move |x: f32| {
         if x <= 1000. {
@@ -176,6 +175,13 @@ fn run(args: Args) -> Result<(), Error> {
             0.
         }
     };
+
+    let spec = AudioSpecDesired {
+        freq: Some(SAMPLING_FREQ as i32),
+        channels: Some(1),
+        samples: None,
+    };
+
     let synth = SynthBuilder::new(StringSynth::new(500))
         // .chain(NoopFilter)
         .chain(FIR::new(25, freq_curve))
@@ -187,11 +193,55 @@ fn run(args: Args) -> Result<(), Error> {
 
     dev.resume();
 
+    loop {
+        match audio_recv.recv().unwrap() {
+            AudioEvent::Midi(MidiEvent { inner, .. }) => match inner {
+                MidiEventInner::Down { velocity: _, note } => {
+                    let freq = note::midi_note_to_freq(note);
+                    let mut lock = dev.lock();
+                    let synth = &mut lock.0.synth;
+                    synth.tune(freq);
+                    synth.trigger_count = 50;
+                }
+                _ => {}
+            },
+            AudioEvent::PlayNote(freq) => {
+                let mut lock = dev.lock();
+                let synth = &mut lock.0.synth;
+                synth.tune(freq);
+                synth.trigger_count = 50;
+            }
+            AudioEvent::Terminate => break,
+        }
+    }
+}
+
+fn run(args: Args) -> Result<(), Error> {
+    let ctx = sdl2::init().unwrap();
+    let audio = ctx.audio().unwrap();
+    let video = ctx.video().unwrap();
+    let event = ctx.event()?;
+    event.register_custom_event::<MidiEvent>()?;
+    let mut pump = ctx.event_pump().unwrap();
+    pump.enable_event(EventType::KeyDown);
+
+    let (send_audio, recv_audio) = mpsc::channel();
+
     let win = video.window("synthtoy", 200, 200);
     let mut win = win.build().unwrap();
     win.show();
 
-    let _midi = args.midi_device.map(|d| initialize_midi(d, send_midi));
+    let _audio_thread = {
+        let crime = AudioSubsystemCrimesWrapper(audio);
+        std::thread::spawn(move || {
+            audio_thread(crime, recv_audio);
+        });
+    };
+
+    let _midi = args.midi_device.map({
+        let send_audio = send_audio.clone();
+        move |d| initialize_midi(d, send_audio)
+    });
 
     loop {
         let ev = pump.wait_event();
@@ -203,37 +253,21 @@ fn run(args: Args) -> Result<(), Error> {
                 keycode: Some(keycode),
                 ..
             } => match keycode {
-                Keycode::O => {
-                    let mut lock = dev.lock();
-                    let delay = &mut lock.0.synth.delay;
-                    delay.set_len(delay.len() + 5);
-                    println!("len: {}", delay.len());
-                }
-                Keycode::I => {
-                    let mut lock = dev.lock();
-                    let delay = &mut lock.0.synth.delay;
-                    delay.set_len((delay.len() - 5).max(1));
-                    println!("len: {}", delay.len());
-                }
+                Keycode::O => {}
+                Keycode::I => {}
                 Keycode::Q => {
+                    send_audio.send(AudioEvent::Terminate);
                     break;
                 }
-                Keycode::G => {
-                    let mut lock = dev.lock();
-                    // todo fix this by setting trigger on Filter::process
-                    lock.0.synth.trigger_count = 50;
-                }
+                Keycode::G => {}
                 Keycode::S => {
-                    let lock = dev.lock();
-                    lock.0.synth.snoop.save().unwrap();
+                    // let lock = dev.lock();
+                    // lock.0.synth.snoop.save().unwrap();
                     // lock.0.snoop.save().unwrap();
                 }
                 &k => {
                     if let Some(n) = key_to_freq(k) {
-                        let mut lock = dev.lock();
-                        let synth = &mut lock.0.synth;
-                        synth.tune(n);
-                        synth.trigger_count = 50;
+                        send_audio.send(AudioEvent::PlayNote(n))?;
                     }
                 }
             },
