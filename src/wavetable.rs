@@ -1,6 +1,3 @@
-use crate::Filter;
-use lazy_static::lazy_static;
-
 const PERIOD_SAMPLE_SIZE: usize = 4096;
 
 pub type WaveLookupTable = [f32; PERIOD_SAMPLE_SIZE];
@@ -16,7 +13,11 @@ struct SquareWave;
 impl WavetableSource for SquareWave {
     // period = 4096 steps = 2 pi
     fn sample(&self, index: usize) -> f32 {
-        if index % PERIOD_SAMPLE_SIZE < (PERIOD_SAMPLE_SIZE / 2) {-1.} else {1.}
+        if index % PERIOD_SAMPLE_SIZE < (PERIOD_SAMPLE_SIZE / 2) {
+            -1.
+        } else {
+            1.
+        }
     }
 }
 
@@ -34,10 +35,11 @@ macro_rules! impl_lookup {
     }
 }
 
-impl_lookup!{
+impl_lookup! {
     (TriangleWave, TRIANGLE_VALUES),
     (SineWave, SIN_VALUES)
 }
+
 pub struct WaveTable<Wave: WavetableSource>(Wave);
 
 impl<W: WavetableSource> WaveTable<W> {
@@ -45,7 +47,6 @@ impl<W: WavetableSource> WaveTable<W> {
         Self(w)
     }
 }
-
 
 // todo implement
 // impl<W: WavetableSource> Filter for WaveTable<W> {}

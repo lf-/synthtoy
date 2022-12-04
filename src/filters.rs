@@ -13,7 +13,6 @@ impl<S: 'static + Filter + Send> SynthBuilder<S, NoopFilter> {
     pub fn new(synth: S) -> Self {
         SynthBuilder(synth, NoopFilter)
     }
-
 }
 impl<S: 'static + Filter + Send, T: Filter> SynthBuilder<S, T> {
     pub fn chain<F: Filter>(self, filter: F) -> SynthBuilder<S, Chain<F, T>> {
@@ -21,7 +20,10 @@ impl<S: 'static + Filter + Send, T: Filter> SynthBuilder<S, T> {
     }
 
     pub fn build(self) -> Synth<S, T> {
-        Synth {synth: self.0, filter: self.1}
+        Synth {
+            synth: self.0,
+            filter: self.1,
+        }
     }
 }
 
@@ -155,11 +157,11 @@ pub struct Pipe {
 }
 
 impl Pipe {
-    fn new(components: Vec<Box<dyn Filter>>) -> Pipe {
+    pub fn new(components: Vec<Box<dyn Filter>>) -> Pipe {
         Self { components }
     }
 
-    fn add<T>(&mut self, comp: T)
+    pub fn add<T>(&mut self, comp: T)
     where
         T: Filter,
     {
@@ -211,12 +213,12 @@ impl Filter for Snoop {
 pub struct NoopFilter;
 
 impl Filter for NoopFilter {
-    fn process(&mut self, samples: &mut [f32]) {}
+    fn process(&mut self, _samples: &mut [f32]) {}
 }
 
 pub struct Synth<S: 'static + Filter + Send, F: Filter = NoopFilter> {
     pub synth: S,
-    pub filter: F
+    pub filter: F,
 }
 
 impl<S: 'static + Filter + Send, F: Filter> Filter for Synth<S, F> {
