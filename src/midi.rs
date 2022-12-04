@@ -33,6 +33,7 @@ pub enum MidiEventInner {
     Down { velocity: u8, note: u8 },
     Up { velocity: u8, note: u8 },
     KeyPressure { key: u8, pressure: u8 },
+    PitchBend(u16),
 }
 
 pub fn parse_midi(timestamp: u64, midi: &[u8]) -> Option<MidiEvent> {
@@ -56,8 +57,19 @@ pub fn parse_midi(timestamp: u64, midi: &[u8]) -> Option<MidiEvent> {
                 key: midi[1],
                 pressure: midi[2],
             },
+            0xe => MidiEventInner::PitchBend(u16::from_le_bytes([midi[1], midi[2]])),
+            0xf => match byte0 {
+                0xf8 => {
+                    // timing tick
+                    return None;
+                }
+                n => {
+                    println!("unk sys command {n}");
+                    return None;
+                }
+            },
             _ => {
-                // println!("unk command: {}", cmd);
+                println!("unk command: {:x?}", &midi);
                 return None;
             }
         },
