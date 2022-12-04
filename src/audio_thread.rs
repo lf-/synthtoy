@@ -43,12 +43,13 @@ pub fn audio_thread(audio: AudioSubsystemCrimesWrapper, audio_recv: mpsc::Receiv
     let spec = AudioSpecDesired {
         freq: Some(SAMPLING_FREQ as i32),
         channels: Some(1),
-        samples: None,
+        samples: Some(256),
     };
 
     let synth = SynthBuilder::new(StringSynth::new(500))
         // .chain(NoopFilter)
-        .chain(FIR::new(25, freq_curve))
+        // FIXME: why does this make a bump on startup?
+        // .chain(FIR::new(25, freq_curve))
         .build();
 
     let mut dev = audio
